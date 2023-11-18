@@ -66,7 +66,7 @@ class AutomaticReconstructionController : public Thread {
     Quality quality = Quality::HIGH;
 
     // Whether to use shared intrinsics or not.
-    bool single_camera = false;
+    bool single_camera = true;
 
     // Which camera model to use for images.
     std::string camera_model = "SIMPLE_RADIAL";
@@ -74,12 +74,8 @@ class AutomaticReconstructionController : public Thread {
     // Whether to perform sparse mapping.
     bool sparse = true;
 
-// Whether to perform dense mapping.
-#ifdef CUDA_ENABLED
-    bool dense = true;
-#else
+    // Whether to perform dense mapping.
     bool dense = false;
-#endif
 
     // The meshing algorithm to be used.
     Mesher mesher = Mesher::POISSON;

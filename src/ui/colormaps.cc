@@ -29,9 +29,13 @@
 //
 // Author: Johannes L. Schoenberger (jsch-at-demuc-dot-de)
 
+#include <fstream>
+#include <iostream>
+
 #include "ui/colormaps.h"
 
 #include "util/bitmap.h"
+#include "util/string.h"
 
 namespace colmap {
 
@@ -248,6 +252,78 @@ void ImageColormapNameFilter::ComputeColor(const Image& image,
     }
   }
 
+  *plane_color = kDefaultPlaneColor;
+  *frame_color = kDefaultFrameColor;
+}
+
+void ImageColormapNumRangeFilter::Prepare(
+    EIGEN_STL_UMAP(camera_t, Camera) & cameras,
+    EIGEN_STL_UMAP(image_t, Image) & images,
+    EIGEN_STL_UMAP(point3D_t, Point3D) & points3D,
+    std::vector<image_t>& reg_image_ids) {}
+
+void ImageColormapNumRangeFilter::AddColorForNumRange(
+    size_t num_start, size_t num_end, const Eigen::Vector4f& plane_color,
+    const Eigen::Vector4f& frame_color) {
+  std::cout << "Adding num range filter [" << num_start << ", " << num_end
+            << "]\n";
+  image_num_range_colors_.emplace_back(
+      std::make_pair(num_start, num_end),
+      std::make_pair(plane_color, frame_color));
+}
+
+void ImageColormapNumRangeFilter::ClearColorNumRanges() {
+  image_num_range_colors_.clear();
+}
+
+void ImageColormapNumRangeFilter::AddInvisForNumRange(size_t num_start,
+                                                      size_t num_end) {
+  std::cout << "Adding num range invis filter [" << num_start << ", " << num_end
+            << "]\n";
+  invis_num_ranges_.push_back(std::make_pair(num_start, num_end));
+}
+
+void ImageColormapNumRangeFilter::ClearInvisNumRanges() {
+  invis_num_ranges_.clear();
+}
+
+void ImageColormapNumRangeFilter::ComputeColor(const Image& image,
+                                               Eigen::Vector4f* plane_color,
+                                               Eigen::Vector4f* frame_color) {
+  if (image_num_range_colors_.size() > 0 || invis_num_ranges_.size() > 0) {
+    // White and zero alpha.
+    const Eigen::Vector4f kInvisColor = {1.0f, 0.1f, 1.0f, 0.0f};
+
+    QRegExp regex("(\\d+)");
+    int pos = regex.indexIn(QString(image.Name().data()));
+    QStringList captures = regex.capturedTexts();
+    if (captures.count() > 0) {
+      bool is_int = false;
+      size_t image_num = static_cast<size_t>(captures[1].toInt(&is_int));
+      if (is_int) {
+        // First apply color.
+        for (const auto& image_num_range_color : image_num_range_colors_) {
+          size_t num_start = image_num_range_color.first.first;
+          size_t num_end = image_num_range_color.first.second;
+          if (num_start <= image_num && image_num <= num_end) {
+            *plane_color = image_num_range_color.second.first;
+            *frame_color = image_num_range_color.second.second;
+            return;
+          }
+        }
+        // Then apply invisibleness.
+        for (const auto& invis_range : invis_num_ranges_) {
+          size_t num_start = invis_range.first;
+          size_t num_end = invis_range.second;
+          if (num_start <= image_num && image_num <= num_end) {
+            *plane_color = kInvisColor;
+            *frame_color = kInvisColor;
+            return;
+          }
+        }
+      }
+    }
+  }
   *plane_color = kDefaultPlaneColor;
   *frame_color = kDefaultFrameColor;
 }

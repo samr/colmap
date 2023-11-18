@@ -60,6 +60,8 @@ class RenderOptionsWidget : public OptionsWidget {
   void ApplyImageColormap();
   void ApplyBackgroundColor();
 
+  void SelectImageNum();
+
   void SelectColor(const std::string& title, Eigen::Vector4f* color);
   void SelectPointColormap(const int idx);
   void SelectImageColormap(const int idx);
@@ -72,10 +74,17 @@ class RenderOptionsWidget : public OptionsWidget {
   void ImageColormapNameFilterAddWord();
   void ImageColormapNameFilterClearWords();
 
+  void ImageColormapNumRangeFilterAddRange();
+  void ImageColormapNumRangeFilterClearRanges();
+  void ImageColormapNumRangeFilterAddInvisRange();
+  void ImageColormapNumRangeFilterClearInvisRanges();
+
   OptionManager* options_;
   ModelViewerWidget* model_viewer_widget_;
 
   Eigen::Vector4f background_color_;
+
+  QHBoxLayout* image_select_layout_;
 
   QComboBox* projection_cb_;
 
@@ -89,9 +98,12 @@ class RenderOptionsWidget : public OptionsWidget {
   QPushButton* select_image_plane_color_;
   QPushButton* select_image_frame_color_;
   QHBoxLayout* image_colormap_name_filter_layout_;
+  QHBoxLayout* image_colormap_num_range_filter_layout_;
+  QHBoxLayout* image_colormap_num_range_filter_invis_layout_;
   Eigen::Vector4f image_plane_color_;
   Eigen::Vector4f image_frame_color_;
   ImageColormapNameFilter image_colormap_name_filter_;
+  ImageColormapNumRangeFilter image_colormap_num_range_filter_;
 };
 
 }  // namespace colmap

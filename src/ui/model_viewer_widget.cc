@@ -31,6 +31,16 @@
 
 #include "ui/model_viewer_widget.h"
 
+#include <algorithm>  //for replace
+#include <fstream>
+#include <iostream>
+#include <list>
+#include <math.h>
+#include <sstream>
+#include <string>
+#include <tuple>
+#include <vector>
+
 #include "ui/main_window.h"
 
 #define SELECTION_BUFFER_IMAGE_IDX 0
@@ -40,6 +50,7 @@ const Eigen::Vector4f kSelectedPointColor(0.0f, 1.0f, 0.0f, 1.0f);
 
 const Eigen::Vector4f kSelectedImagePlaneColor(1.0f, 0.0f, 1.0f, 0.6f);
 const Eigen::Vector4f kSelectedImageFrameColor(0.8f, 0.0f, 0.8f, 1.0f);
+const Eigen::Vector4f kSelectedFixedPathColor(0.0f, 0.8f, 0.8f, 1.0f);
 
 const Eigen::Vector4f kMovieGrabberImagePlaneColor(0.0f, 1.0f, 1.0f, 0.6f);
 const Eigen::Vector4f kMovieGrabberImageFrameColor(0.0f, 0.8f, 0.8f, 1.0f);
@@ -51,6 +62,86 @@ const Eigen::Vector4f kZAxisColor(0.0f, 0.0f, 0.9f, 0.5f);
 
 namespace colmap {
 namespace {
+
+std::pair<double, double> ComputeMeanAndStandardDeviation(
+    const std::vector<double>& values) {
+  const double length = static_cast<double>(values.size());
+
+  double sum = 0;
+  for (auto value : values) {
+    sum += value;
+  }
+  const double mean = sum / length;
+
+  double variance = 0;
+  for (auto value : values) {
+    variance += pow((value - mean), 2);
+  }
+  variance *= (1 / (length - 1));
+
+  const double std_dev = std::sqrt(variance);
+  return {mean, std_dev};
+}
+
+// Compute the mean over the trailing window for each next value in values.
+std::vector<double> RollingMean(const std::vector<double>& values,
+                                int window = 6) {
+  std::vector<double> averaged_values;
+  averaged_values.reserve(values.size());
+  for (int i = 0; i < static_cast<int>(values.size()); ++i) {
+    double total = 0.0;
+    int num_values = 0;
+    for (int j = 0; j < window; ++j) {
+      const int k = i - j;
+      if (k >= 0) {
+        total += values[k];
+        ++num_values;
+      }
+    }
+    averaged_values.push_back(total / static_cast<double>(num_values));
+  }
+  return averaged_values;
+}
+
+// Only return the indices for values that are in the lower 3 quartiles
+// of the normal distribution.
+std::vector<size_t> IdentifyInlierIndices(const std::vector<double>& values,
+                                          double mean, double std_dev) {
+  const double upper_limit = mean + 3 * std_dev;
+  std::vector<size_t> inlier_indices;
+  for (int i = 0; i < values.size(); i++) {
+    if (values[i] <= upper_limit) {
+      inlier_indices.push_back(i);
+    } else {
+      std::cout << StringPrintf("%zu: removed outlier %.2f\n", i, values[i]);
+    }
+  }
+  return inlier_indices;
+}
+
+// Returns the indices of the inliers, where outliers are determined by taking
+// the difference between the measured values and the rolling mean of the
+// values, looking at the normal distribution and removing any that are in the
+// upper quartile.
+std::vector<size_t> RollingOutlierFilter(const std::vector<double>& sensor,
+                                         int window = 6) {
+  const auto vec_mean = RollingMean(sensor, window);
+
+  // Calculate the difference between the real values and the rolling mean.
+  std::vector<double> vec_mean_diff;
+  vec_mean_diff.reserve(vec_mean.size());
+  for (int i = 0; i < sensor.size(); i++) {
+    vec_mean_diff.push_back(sensor[i] - vec_mean[i]);
+  }
+
+  // Compute the standard deviation on the difference and use it to select
+  // inliers.
+  const auto mean_and_std = ComputeMeanAndStandardDeviation(vec_mean_diff);
+  const auto mean = mean_and_std.first;
+  const auto std_dev = mean_and_std.second;
+  // std::cout << StringPrintf("mean=%f, std_dev=%f\n", mean, std_dev);
+  return IdentifyInlierIndices(vec_mean_diff, mean, std_dev);
+}
 
 // Generate unique index from RGB color in the range [0, 256^3].
 inline size_t RGBToIndex(const uint8_t r, const uint8_t g, const uint8_t b) {
@@ -254,6 +345,7 @@ void ModelViewerWidget::paintGL() {
   image_line_painter_.Render(pmv_matrix, width(), height(), 1);
   image_triangle_painter_.Render(pmv_matrix);
   image_connection_painter_.Render(pmv_matrix, width(), height(), 1);
+  image_time_line_painter_.Render(pmv_matrix, width(), height(), 1);
 
   // Movie grabber cameras
   movie_grabber_path_painter_.Render(pmv_matrix, width(), height(), 1.5);
@@ -279,6 +371,32 @@ void ModelViewerWidget::ReloadReconstruction() {
   images.clear();
   for (const image_t image_id : reg_image_ids) {
     images[image_id] = reconstruction->Image(image_id);
+  }
+
+  // Parse images with numbers in their names, e.g. out00001.png
+  const size_t num_images = reg_image_ids.size();
+  if (num_images > 0) {
+    name_nums_to_image_indices.clear();
+    name_nums_to_image_indices.resize(num_images);
+    QRegExp regex("(\\d+)");  // Capture the first group of digits
+    for (size_t i = 0; i < num_images; ++i) {
+      const Image& image = images[reg_image_ids[i]];
+      std::ignore = regex.indexIn(QString(image.Name().data()));
+      QStringList captures = regex.capturedTexts();
+      bool success = false;
+      size_t image_num;
+      if (captures.count() > 0) {
+        success = true;
+        image_num = static_cast<size_t>(captures[1].toInt(&success));
+      }
+      if (!success) {
+        image_num = std::numeric_limits<size_t>::max() - num_images + i;
+      }
+      name_nums_to_image_indices[i] = {image_num, i};
+    }
+    std::sort(name_nums_to_image_indices.begin(),
+              name_nums_to_image_indices.end(),
+              [](const auto& a, const auto& b) { return a.first < b.first; });
   }
 
   statusbar_status_label->setText(QString().asprintf(
@@ -435,12 +553,39 @@ void ModelViewerWidget::ChangeCameraSize(const float delta) {
   image_size_ = std::max(kMinImageSize, std::min(kMaxImageSize, image_size_));
   UploadImageData();
   UploadMovieGrabberData();
+  UploadImageTimeData();
   update();
 }
 
 void ModelViewerWidget::ResetView() {
   SetupView();
   Upload();
+}
+
+void ModelViewerWidget::SelectImage(size_t image_num, size_t image_num_type) {
+  switch (image_num_type) {
+    case 0:  // Select using the number in the filename.
+      for (const auto& num_and_index : name_nums_to_image_indices) {
+        if (num_and_index.first == image_num) {
+          selected_image_id_ =
+              static_cast<image_t>(reg_image_ids[num_and_index.second]);
+          break;
+        }
+      }
+      break;
+    case 1:  // Select using the image_id.
+      for (const auto& image_id : reg_image_ids) {
+        if (image_id == image_num) {
+          selected_image_id_ = static_cast<image_t>(image_num);
+          break;
+        }
+      }
+      break;
+  }
+  selected_point3D_id_ = kInvalidPoint3DId;
+  ShowImageInfo(selected_image_id_);
+  UploadImageData();
+  update();
 }
 
 QMatrix4x4 ModelViewerWidget::ModelViewMatrix() const {
@@ -464,6 +609,7 @@ void ModelViewerWidget::SelectObject(const int x, const int y) {
   // Upload data in selection mode (one color per object).
   UploadImageData(true);
   UploadPointData(true);
+  UploadImageTimeData(true);
 
   // Render in selection mode, with larger points to improve selection accuracy.
   const QMatrix4x4 pmv_matrix = projection_matrix_ * model_view_matrix_;
@@ -519,6 +665,7 @@ void ModelViewerWidget::SelectObject(const int x, const int y) {
   UploadImageData();
   UploadPointConnectionData();
   UploadImageConnectionData();
+  UploadImageTimeData();
 
   update();
 }
@@ -654,6 +801,7 @@ void ModelViewerWidget::SetupPainters() {
   image_line_painter_.Setup();
   image_triangle_painter_.Setup();
   image_connection_painter_.Setup();
+  image_time_line_painter_.Setup();
 
   movie_grabber_path_painter_.Setup();
   movie_grabber_line_painter_.Setup();
@@ -681,6 +829,7 @@ void ModelViewerWidget::Upload() {
   UploadMovieGrabberData();
   UploadPointConnectionData();
   UploadImageConnectionData();
+  UploadImageTimeData();
 
   update();
 }
@@ -826,8 +975,9 @@ void ModelViewerWidget::UploadPointConnectionData() {
 
   std::vector<LinePainter::Data> line_data;
 
-  if (selected_point3D_id_ == kInvalidPoint3DId) {
-    // No point selected, so upload empty data
+  if (selected_point3D_id_ == kInvalidPoint3DId ||
+      !options_->render->selected_image_connections) {
+    // No point selected, or rendering not desired, so upload empty data
     point_connection_painter_.Upload(line_data);
     return;
   }
@@ -887,8 +1037,10 @@ void ModelViewerWidget::UploadImageData(const bool selection_mode) {
 
     // Lines are not colored with the indexed color in selection mode, so do not
     // show them, so they do not block the selection process
-    BuildImageModel(image, camera, image_size_, plane_color, frame_color,
-                    &triangle_data, selection_mode ? nullptr : &line_data);
+    if (frame_color(3) > 0.f) {
+      BuildImageModel(image, camera, image_size_, plane_color, frame_color,
+                      &triangle_data, selection_mode ? nullptr : &line_data);
+    }
   }
 
   image_line_painter_.Upload(line_data);
@@ -901,7 +1053,11 @@ void ModelViewerWidget::UploadImageConnectionData() {
   std::vector<LinePainter::Data> line_data;
   std::vector<image_t> image_ids;
 
-  if (selected_image_id_ != kInvalidImageId) {
+  if (!options_->render->selected_image_connections &&
+      !options_->render->image_connections) {
+    image_connection_painter_.Upload(line_data);
+    return;
+  } else if (selected_image_id_ != kInvalidImageId) {
     // Show connections to selected images
     image_ids.push_back(selected_image_id_);
   } else if (options_->render->image_connections) {
@@ -1007,14 +1163,119 @@ void ModelViewerWidget::UploadMovieGrabberData() {
         frame_color = kMovieGrabberImageFrameColor;
       }
 
-      BuildImageModel(image, camera, image_size_, plane_color, frame_color,
-                      &triangle_data, &line_data);
+      if (frame_color(3) > 0.f) {
+        BuildImageModel(image, camera, image_size_, plane_color, frame_color,
+                        &triangle_data, &line_data);
+      }
     }
   }
 
   movie_grabber_path_painter_.Upload(path_data);
   movie_grabber_line_painter_.Upload(line_data);
   movie_grabber_triangle_painter_.Upload(triangle_data);
+}
+
+void ModelViewerWidget::UploadImageTimeData(const bool selection_mode) {
+  makeCurrent();
+
+  const size_t num_images = reg_image_ids.size();
+  if (num_images == 0) {
+    return;
+  }
+
+  std::vector<LinePainter::Data> line_data;
+  line_data.reserve(reg_image_ids.size());
+
+  std::vector<double> pc_x, pc_y, pc_z;
+  pc_x.reserve(num_images);
+  pc_y.reserve(num_images);
+  pc_z.reserve(num_images);
+  for (size_t i = 0; i < num_images; ++i) {
+    const auto& image_name = name_nums_to_image_indices[i];
+    const size_t image_id_parsed = image_name.first;
+    const image_t image_id = reg_image_ids[image_name.second];
+    const Image& image = images[image_id];
+    const Eigen::Matrix<float, 3, 4> inv_proj_matrix =
+        image.InverseProjectionMatrix().cast<float>();
+    const Eigen::Vector3f projection_center = inv_proj_matrix.rightCols<1>();
+    pc_x.push_back(projection_center(0));
+    pc_y.push_back(projection_center(1));
+    pc_z.push_back(projection_center(2));
+  }
+  const int window_size = std::min(static_cast<int>(num_images), 6);
+  const std::vector<size_t> inliers_x = RollingOutlierFilter(pc_x, window_size);
+  const std::vector<size_t> inliers_y = RollingOutlierFilter(pc_y, window_size);
+  const std::vector<size_t> inliers_z = RollingOutlierFilter(pc_z, window_size);
+  std::vector<size_t> inliers_xy, inliers_xyz;
+  std::set_intersection(inliers_x.begin(), inliers_x.end(), inliers_y.begin(),
+                        inliers_y.end(), std::back_inserter(inliers_xy));
+  std::set_intersection(inliers_xy.begin(), inliers_xy.end(), inliers_z.begin(),
+                        inliers_z.end(), std::back_inserter(inliers_xyz));
+
+  // Output the discarded outliers and two inlier values on either end.
+  for (size_t i = 1; i < inliers_xyz.size(); ++i) {
+    const auto first_outlier = inliers_xyz[i - 1] + 1;
+    if (first_outlier != inliers_xyz[i]) {
+      std::cout << StringPrintf("outlier indices: [%zu,%zu]\n", first_outlier,
+                                inliers_xyz[i] - 1);
+      for (size_t j = inliers_xyz[i - 1]; j <= inliers_xyz[i]; ++j) {
+        const auto& file_num_and_index = name_nums_to_image_indices[j];
+        const size_t file_num = file_num_and_index.first;
+        const image_t image_id = reg_image_ids[file_num_and_index.second];
+        const std::string lier =
+            (j == inliers_xyz[i - 1] || j == inliers_xyz[i]) ? " inlier"
+                                                             : "outlier";
+        std::cout << StringPrintf(
+            "%s env [%zu]: file=out%05zu.png, image_id=%zu, x=%.2f, "
+            "y=%.2f, z=%.2f\n",
+            lier.c_str(), j, file_num, image_id, pc_x[j], pc_y[j], pc_z[j]);
+      }
+    }
+  }
+
+  // // Useful for debugging when inliers is returning something crazy.
+  // for (size_t i = 0; i < inliers_xyz.size() && i < 100; ++i) {
+  //   const size_t j = inliers_xyz[i];
+  //   if (j >= num_images) {
+  //       std::cout << StringPrintf("%02d: !! %zu >= %zu\n", i, j, num_images);
+  //   } else {
+  //       std::cout << StringPrintf("%02d: %zu - x=%.4f, y=%.4f, z=%.4f\n", i,
+  //       j, pc_x[j], pc_y[j], pc_z[j]);
+  //   }
+  // }
+
+  const Eigen::Vector4f kpath_color = kSelectedFixedPathColor;
+  Eigen::Vector4f frame_color, plane_color;
+  for (size_t i = 1; i < inliers_xyz.size(); ++i) {
+    size_t prev = inliers_xyz[i - 1];
+    size_t curr = inliers_xyz[i];
+
+    bool is_invis = false;
+    const image_t image_id_0 =
+        reg_image_ids[name_nums_to_image_indices[i - 1].second];
+    const image_t image_id_1 =
+        reg_image_ids[name_nums_to_image_indices[i].second];
+    image_colormap_->ComputeColor(images[image_id_0], &plane_color,
+                                  &frame_color);
+    if (frame_color(3) < 0.01f) {
+      is_invis = true;
+    }
+    image_colormap_->ComputeColor(images[image_id_1], &plane_color,
+                                  &frame_color);
+    if (frame_color(3) < 0.01f) {
+      is_invis = true;
+    }
+
+    if (!is_invis) {
+      line_data.emplace_back(
+          PointPainter::Data(pc_x[prev], pc_y[prev], pc_z[prev], kpath_color(0),
+                             kpath_color(1), kpath_color(2), kpath_color(3)),
+          PointPainter::Data(pc_x[curr], pc_y[curr], pc_z[curr], kpath_color(0),
+                             kpath_color(1), kpath_color(2), kpath_color(3)));
+    }
+  }
+
+  image_time_line_painter_.Upload(line_data);
 }
 
 void ModelViewerWidget::ComposeProjectionMatrix() {
