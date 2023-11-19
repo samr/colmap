@@ -111,7 +111,7 @@ if(IS_MSVC)
     add_definitions("-DGLOG_NO_ABBREVIATED_SEVERITIES")
     add_definitions("-DGL_GLEXT_PROTOTYPES")
     add_definitions("-DNOMINMAX")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /EHsc")
+    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}")
     # Enable object level parallel builds in Visual Studio.
     set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} /MP")
     set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} /MP")

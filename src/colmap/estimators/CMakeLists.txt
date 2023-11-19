@@ -66,6 +66,12 @@ COLMAP_ADD_LIBRARY(
         Ceres::ceres
 )
 
+# This flag should have been added by the root CMakeLists.txt -- I'm not sure why this is required.
+if(IS_MSVC)
+  set_target_properties(colmap_estimators
+    PROPERTIES COMPILE_OPTIONS $<$<OR:$<CONFIG:Debug>,$<CONFIG:RelWithDebInfo>>:/bigobj>)
+endif()
+
 COLMAP_ADD_TEST(
     NAME absolute_pose_test
     SRCS absolute_pose_test.cc

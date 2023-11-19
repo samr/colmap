@@ -90,6 +90,12 @@ if(CUDA_ENABLED)
             CUDA::curand
     )
 
+    # Hack for the extra \EHsc that gets added on Windows to the nvcc compile line, which causes the error:
+    # "nvcc fatal: A single input file is required for a non-link phase when an outputfile is specified..."
+    if(IS_MSVC)
+        set_target_properties(colmap_mvs_cuda PROPERTIES COMPILE_OPTIONS -Xcompiler)
+    endif()
+
     COLMAP_ADD_TEST(
         NAME gpu_mat_test
         SRCS gpu_mat_test.cu
