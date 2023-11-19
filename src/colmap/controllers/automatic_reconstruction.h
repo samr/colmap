@@ -64,7 +64,7 @@ class AutomaticReconstructionController : public Thread {
     Quality quality = Quality::HIGH;
 
     // Whether to use shared intrinsics or not.
-    bool single_camera = false;
+    bool single_camera = true;
 
     // Whether to use shared intrinsics or not for all images in the same
     // sub-folder.

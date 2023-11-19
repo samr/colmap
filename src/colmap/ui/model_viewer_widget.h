@@ -95,6 +95,7 @@ class ModelViewerWidget : public QOpenGLWidget,
   void TranslateView(float x, float y, float prev_x, float prev_y);
 
   void ResetView();
+  void SelectImage(size_t image_num, size_t image_num_type = 0);
 
   QMatrix4x4 ModelViewMatrix() const;
   void SetModelViewMatrix(const QMatrix4x4& matrix);
@@ -121,6 +122,7 @@ class ModelViewerWidget : public QOpenGLWidget,
   std::unordered_map<image_t, Image> images;
   std::unordered_map<point3D_t, Point3D> points3D;
   std::vector<image_t> reg_image_ids;
+  std::vector<std::pair<size_t, size_t>> name_nums_to_image_indices;
 
   QLabel* statusbar_status_label;
 
@@ -145,6 +147,7 @@ class ModelViewerWidget : public QOpenGLWidget,
   void UploadImageData(bool selection_mode = false);
   void UploadImageConnectionData();
   void UploadMovieGrabberData();
+  void UploadImageTimeData(const bool selection_mode = false);
 
   void ComposeProjectionMatrix();
 
@@ -168,6 +171,7 @@ class ModelViewerWidget : public QOpenGLWidget,
   LinePainter image_line_painter_;
   TrianglePainter image_triangle_painter_;
   LinePainter image_connection_painter_;
+  LinePainter image_time_line_painter_;
 
   LinePainter movie_grabber_path_painter_;
   LinePainter movie_grabber_line_painter_;

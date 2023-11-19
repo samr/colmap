@@ -33,6 +33,11 @@
 #include "colmap/util/types.h"
 
 #include <Eigen/Core>
+#include <Eigen/Geometry>
+#include <Eigen/StdVector>
+
+#include <QtCore>
+#include <QOpenGLFunctions_3_2_Core>
 
 namespace colmap {
 
@@ -168,6 +173,33 @@ class ImageColormapNameFilter : public ImageColormapBase {
   std::vector<
       std::pair<std::string, std::pair<Eigen::Vector4f, Eigen::Vector4f>>>
       image_name_colors_;
+};
+
+// Use color for images with specific words in their name.
+class ImageColormapNumRangeFilter : public ImageColormapBase {
+ public:
+  void Prepare(std::unordered_map<camera_t, Camera> & cameras,
+               std::unordered_map<image_t, Image> & images,
+               std::unordered_map<point3D_t, Point3D> & points3D,
+               std::vector<image_t>& reg_image_ids) override;
+
+  void AddColorForNumRange(size_t num_start, size_t num_end,
+                           const Eigen::Vector4f& plane_color,
+                           const Eigen::Vector4f& frame_color);
+  void ClearColorNumRanges();
+
+  void AddInvisForNumRange(size_t num_start, size_t num_end);
+  void ClearInvisNumRanges();
+
+  void ComputeColor(const Image& image, Eigen::Vector4f* plane_color,
+                    Eigen::Vector4f* frame_color) override;
+
+ private:
+  // The plane and frame colors for different words.
+  std::vector<std::pair<std::pair<size_t, size_t>,
+                        std::pair<Eigen::Vector4f, Eigen::Vector4f>>>
+      image_num_range_colors_;
+  std::vector<std::pair<size_t, size_t>> invis_num_ranges_;
 };
 
 }  // namespace colmap

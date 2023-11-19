@@ -40,7 +40,7 @@ AutomaticReconstructionWidget::AutomaticReconstructionWidget(
       thread_control_widget_(new ThreadControlWidget(this)) {
   setWindowTitle("Automatic reconstruction");
 
-  AddOptionDirPath(&options_.workspace_path, "Workspace folder");
+  auto* le = AddOptionDirPath(&options_.workspace_path, "Workspace folder");
   AddSpacer();
   AddOptionDirPath(&options_.image_path, "Image folder");
   AddSpacer();
@@ -56,8 +56,8 @@ AutomaticReconstructionWidget::AutomaticReconstructionWidget(
   grid_layout_->addWidget(data_type_label, grid_layout_->rowCount(), 0);
 
   data_type_cb_ = new QComboBox(this);
-  data_type_cb_->addItem("Individual images");
   data_type_cb_->addItem("Video frames");
+  data_type_cb_->addItem("Individual images");
   data_type_cb_->addItem("Internet images");
   grid_layout_->addWidget(data_type_cb_, grid_layout_->rowCount() - 1, 1);
 
@@ -131,11 +131,11 @@ void AutomaticReconstructionWidget::Run() {
 
   switch (data_type_cb_->currentIndex()) {
     case 0:
-      options_.data_type =
-          AutomaticReconstructionController::DataType::INDIVIDUAL;
+      options_.data_type = AutomaticReconstructionController::DataType::VIDEO;
       break;
     case 1:
-      options_.data_type = AutomaticReconstructionController::DataType::VIDEO;
+      options_.data_type =
+          AutomaticReconstructionController::DataType::INDIVIDUAL;
       break;
     case 2:
       options_.data_type =

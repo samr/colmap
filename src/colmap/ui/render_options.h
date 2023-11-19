@@ -54,8 +54,14 @@ struct RenderOptions {
   // reconstruction gets, the less frequently the scene is rendered.
   bool adapt_refresh_rate = true;
 
-  // Whether to visualize image connections.
+  // Whether to visualize all image connections.
   bool image_connections = false;
+
+  // Whether to visualize selected image connections.
+  bool selected_image_connections = false;
+
+  // Whether to visualize selected point connections.
+  bool selected_point_connections = false;
 
   // The projection type of the renderer.
   int projection_type = ProjectionType::PERSPECTIVE;

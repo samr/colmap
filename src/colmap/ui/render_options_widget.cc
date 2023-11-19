@@ -101,6 +101,15 @@ RenderOptionsWidget::RenderOptionsWidget(QWidget* parent,
 
   AddSpacer();
 
+  image_select_layout_ = new QHBoxLayout();
+  QPushButton* image_select_select = new QPushButton("Select", this);
+  connect(image_select_select, &QPushButton::released, this,
+          &RenderOptionsWidget::SelectImageNum);
+  image_select_layout_->addWidget(image_select_select);
+  AddLayoutRow("Select Image", image_select_layout_);
+
+  AddSpacer();
+
   AddOptionDouble(&options->render->max_error, "Point max. error [px]");
   AddOptionInt(&options->render->min_track_len, "Point min. track length", 0);
 
@@ -131,36 +140,64 @@ RenderOptionsWidget::RenderOptionsWidget(QWidget* parent,
   AddSpacer();
 
   image_colormap_cb_ = new QComboBox(this);
-  image_colormap_cb_->addItem("Uniform color");
+  image_colormap_cb_->addItem("Images filename in number range");
   image_colormap_cb_->addItem("Images with words in name");
+  image_colormap_cb_->addItem("Uniform color");
   AddWidgetRow("Image colormap", image_colormap_cb_);
 
-  select_image_plane_color_ = new QPushButton(tr("Select color"), this);
-  connect(select_image_plane_color_, &QPushButton::released, this, [&]() {
-    SelectColor("Image plane color", &image_plane_color_);
-  });
-  AddWidgetRow("Image plane", select_image_plane_color_);
+  image_colormap_num_range_filter_layout_ = new QHBoxLayout();
+  image_colormap_num_range_filter_invis_layout_ = new QHBoxLayout();
+  {
+    QPushButton* add_button = new QPushButton("Add", this);
+    connect(add_button, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNumRangeFilterAddRange);
+    QPushButton* clear_button = new QPushButton("Clear", this);
+    connect(clear_button, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNumRangeFilterClearRanges);
+    image_colormap_num_range_filter_layout_->addWidget(add_button);
+    image_colormap_num_range_filter_layout_->addWidget(clear_button);
+    AddLayoutRow("Num Range to Color", image_colormap_num_range_filter_layout_);
+  }
+  {
+    QPushButton* add_button = new QPushButton("Add", this);
+    connect(add_button, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNumRangeFilterAddInvisRange);
+    QPushButton* clear_button = new QPushButton("Clear", this);
+    connect(clear_button, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNumRangeFilterClearInvisRanges);
+    image_colormap_num_range_filter_invis_layout_->addWidget(add_button);
+    image_colormap_num_range_filter_invis_layout_->addWidget(clear_button);
+    AddLayoutRow("Num Range to Hide",
+                 image_colormap_num_range_filter_invis_layout_);
+  }
 
-  select_image_frame_color_ = new QPushButton(tr("Select color"), this);
-  connect(select_image_frame_color_, &QPushButton::released, this, [&]() {
-    SelectColor("Image frame color", &image_frame_color_);
-  });
-  AddWidgetRow("Image frame", select_image_frame_color_);
+  {
+    image_colormap_name_filter_layout_ = new QHBoxLayout();
+    QPushButton* image_colormap_add_word = new QPushButton("Add", this);
+    connect(image_colormap_add_word, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNameFilterAddWord);
+    QPushButton* image_colormap_clear_words = new QPushButton("Clear", this);
+    connect(image_colormap_clear_words, &QPushButton::released, this,
+            &RenderOptionsWidget::ImageColormapNameFilterClearWords);
+    image_colormap_name_filter_layout_->addWidget(image_colormap_add_word);
+    image_colormap_name_filter_layout_->addWidget(image_colormap_clear_words);
+    AddLayoutRow("Words", image_colormap_name_filter_layout_);
+    HideLayout(image_colormap_name_filter_layout_);
+  }
 
-  image_colormap_name_filter_layout_ = new QHBoxLayout();
-  QPushButton* image_colormap_add_word = new QPushButton("Add", this);
-  connect(image_colormap_add_word,
-          &QPushButton::released,
-          this,
-          &RenderOptionsWidget::ImageColormapNameFilterAddWord);
-  QPushButton* image_colormap_clear_words = new QPushButton("Clear", this);
-  connect(image_colormap_clear_words,
-          &QPushButton::released,
-          this,
-          &RenderOptionsWidget::ImageColormapNameFilterClearWords);
-  image_colormap_name_filter_layout_->addWidget(image_colormap_add_word);
-  image_colormap_name_filter_layout_->addWidget(image_colormap_clear_words);
-  AddLayoutRow("Words", image_colormap_name_filter_layout_);
+  {
+    select_image_plane_color_ = new QPushButton(tr("Select color"), this);
+    connect(select_image_plane_color_, &QPushButton::released, this,
+            [&]() { SelectColor("Image plane color", &image_plane_color_); });
+    AddWidgetRow("Image plane", select_image_plane_color_);
+
+    select_image_frame_color_ = new QPushButton(tr("Select color"), this);
+    connect(select_image_frame_color_, &QPushButton::released, this,
+            [&]() { SelectColor("Image frame color", &image_frame_color_); });
+    AddWidgetRow("Image frame", select_image_frame_color_);
+    HideWidget(select_image_plane_color_);
+    HideWidget(select_image_frame_color_);
+  }
 
   HideLayout(image_colormap_name_filter_layout_);
   connect(image_colormap_cb_,
@@ -175,7 +212,11 @@ RenderOptionsWidget::RenderOptionsWidget(QWidget* parent,
 
   AddSpacer();
 
-  AddOptionBool(&options->render->image_connections, "Image connections");
+  AddOptionBool(&options->render->image_connections, "All image connections");
+  AddOptionBool(&options->render->selected_image_connections,
+                "Selected image connections");
+  AddOptionBool(&options->render->selected_point_connections,
+                "Selected point connections");
 
   AddSpacer();
 
@@ -251,15 +292,19 @@ void RenderOptionsWidget::ApplyImageColormap() {
 
   switch (image_colormap_cb_->currentIndex()) {
     case 0:
+      image_color_map =
+          new ImageColormapNumRangeFilter(image_colormap_num_range_filter_);
+      break;
+    case 1:
+      image_color_map =
+          new ImageColormapNameFilter(image_colormap_name_filter_);
+      break;
+    case 2:
       image_color_map = new ImageColormapUniform();
       reinterpret_cast<ImageColormapUniform*>(image_color_map)
           ->uniform_plane_color = image_plane_color_;
       reinterpret_cast<ImageColormapUniform*>(image_color_map)
           ->uniform_frame_color = image_frame_color_;
-      break;
-    case 1:
-      image_color_map =
-          new ImageColormapNameFilter(image_colormap_name_filter_);
       break;
     default:
       image_color_map = new ImageColormapUniform();
@@ -302,13 +347,23 @@ void RenderOptionsWidget::SelectPointColormap(const int idx) {
 
 void RenderOptionsWidget::SelectImageColormap(const int idx) {
   if (idx == 0) {
+    HideWidget(select_image_plane_color_);
+    HideWidget(select_image_frame_color_);
+    HideLayout(image_colormap_name_filter_layout_);
+    ShowLayout(image_colormap_num_range_filter_layout_);
+    ShowLayout(image_colormap_num_range_filter_invis_layout_);
+  } else if (idx == 1) {
+    HideWidget(select_image_plane_color_);
+    HideWidget(select_image_frame_color_);
+    HideLayout(image_colormap_num_range_filter_layout_);
+    HideLayout(image_colormap_num_range_filter_invis_layout_);
+    ShowLayout(image_colormap_name_filter_layout_);
+  } else {
     ShowWidget(select_image_plane_color_);
     ShowWidget(select_image_frame_color_);
     HideLayout(image_colormap_name_filter_layout_);
-  } else {
-    HideWidget(select_image_plane_color_);
-    HideWidget(select_image_frame_color_);
-    ShowLayout(image_colormap_name_filter_layout_);
+    HideLayout(image_colormap_num_range_filter_layout_);
+    HideLayout(image_colormap_num_range_filter_invis_layout_);
   }
 }
 
@@ -332,6 +387,23 @@ void RenderOptionsWidget::DecreaseCameraSize() {
   model_viewer_widget_->ChangeCameraSize(kDelta);
 }
 
+void RenderOptionsWidget::SelectImageNum() {
+  bool word_ok;
+  const QString word = QInputDialog::getText(
+      this, "", "Image Number:", QLineEdit::Normal, "", &word_ok);
+  if (!word_ok || word == "") {
+    return;
+  }
+
+  bool success = false;
+  auto image_num = static_cast<size_t>(word.toInt(&success));
+  if (!success) {
+    return;
+  }
+
+  model_viewer_widget_->SelectImage(image_num);
+}
+
 void RenderOptionsWidget::ImageColormapNameFilterAddWord() {
   bool word_ok;
   const QString word =
@@ -352,6 +424,71 @@ void RenderOptionsWidget::ImageColormapNameFilterAddWord() {
 
 void RenderOptionsWidget::ImageColormapNameFilterClearWords() {
   image_colormap_name_filter_ = ImageColormapNameFilter();
+}
+
+void RenderOptionsWidget::ImageColormapNumRangeFilterAddRange() {
+  bool range_ok;
+  bool is_int;
+  const QString range_start = QInputDialog::getText(
+      this, "", "Start:", QLineEdit::Normal, "", &range_ok);
+  if (!range_ok || range_start == "") {
+    return;
+  }
+  const size_t num_start = static_cast<size_t>(range_start.toInt(&is_int));
+  if (!is_int) {
+    return;
+  }
+  const QString range_end =
+      QInputDialog::getText(this, "", "End:", QLineEdit::Normal, "", &range_ok);
+  if (!range_ok || range_end == "") {
+    return;
+  }
+  const size_t num_end = static_cast<size_t>(range_end.toInt(&is_int));
+  if (!is_int || num_start >= num_end) {
+    return;
+  }
+
+  Eigen::Vector4f plane_color(ImageColormapBase::kDefaultPlaneColor);
+  SelectColor("Image plane color", &plane_color);
+
+  Eigen::Vector4f frame_color(ImageColormapBase::kDefaultFrameColor);
+  SelectColor("Image frame color", &frame_color);
+
+  image_colormap_num_range_filter_.AddColorForNumRange(
+      num_start, num_end, plane_color, frame_color);
+}
+
+void RenderOptionsWidget::ImageColormapNumRangeFilterClearRanges() {
+  image_colormap_num_range_filter_.ClearColorNumRanges();
+}
+
+void RenderOptionsWidget::ImageColormapNumRangeFilterAddInvisRange() {
+  bool range_ok;
+  bool is_int;
+  const QString range_start = QInputDialog::getText(
+      this, "", "Start:", QLineEdit::Normal, "", &range_ok);
+  if (!range_ok || range_start == "") {
+    return;
+  }
+  const size_t num_start = static_cast<size_t>(range_start.toInt(&is_int));
+  if (!is_int) {
+    return;
+  }
+  const QString range_end =
+      QInputDialog::getText(this, "", "End:", QLineEdit::Normal, "", &range_ok);
+  if (!range_ok || range_end == "") {
+    return;
+  }
+  const size_t num_end = static_cast<size_t>(range_end.toInt(&is_int));
+  if (!is_int || num_start >= num_end) {
+    return;
+  }
+
+  image_colormap_num_range_filter_.AddInvisForNumRange(num_start, num_end);
+}
+
+void RenderOptionsWidget::ImageColormapNumRangeFilterClearInvisRanges() {
+  image_colormap_num_range_filter_.ClearInvisNumRanges();
 }
 
 }  // namespace colmap
